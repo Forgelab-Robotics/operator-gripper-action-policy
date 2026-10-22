@@ -1,47 +1,85 @@
 # Gripper Action Policy Node
 
-独立 Dora policy node，为 Forge Action endpoint
-`gripper.controller/set_opening` 提供 `forge_msgs.GripperCommand` 控制器适配。
+[English](README.md) | [简体中文](README_zh.md)
 
-## 契约
+Standalone Dora policy Node that adapts the Forge Action Endpoint
+`gripper.controller/set_opening` to a `forge_msgs.GripperCommand` controller.
 
-- endpoint descriptor：`set_opening` 是可取消、支持状态查询、最大并发为 1 的 Action。
-- caller 参数严格为 `{"opening_m": <finite number>}`。
-- policy node 只校验有限数并转换为
-  `GripperCommandGoal(position=opening_m, max_velocity=None, max_effort=None)`。
-- `0..0.105 m` 的机械边界由 Gateway schema 与下游 controller 分别验证。本节点不复制该边界。
-- Tool attempt 映射到确定且有界的 controller `goal_id`；同一 attempt 重试不会重复下发。
+## Node, Endpoint and Tool API
 
-## 安装与运行
+| Item | Current implementation |
+| --- | --- |
+| Production Nodes | 1: `gripper_action_policy`; source command `gripper-action-policy`, packaged entrypoint `dist/gripper_action_policy` |
+| Tool integration | Dora `ToolMessage` provider; caller-facing access through Gateway |
+| Direct HTTP Tool API | 0; this Node does not listen on HTTP; Gateway owns the invocation URL |
+| Endpoints | 1: `gripper.controller` |
+| Operations | 1: `set_opening` (Action, cancellable, status supported, maximum concurrency 1) |
+| Gateway Tools | Deployment-defined in `tools.specs`; `robot-control-sim` binds 1 Tool to this operation: `sim.set_gripper_opening` |
 
-Forge 消息从公共包索引解析（`forge-msgs==1.0.1`）；Forge Tool 协议以 `src/forge_tool` 内置（vendored）：
+| Tool ID (Skill configuration) | Endpoint / operation | Provider Node |
+| --- | --- | --- |
+| `sim.set_gripper_opening` | `gripper.controller / set_opening` | `gripper_action_policy` |
+
+Arguments are exactly `{"opening_m": 0.04}` (metres); see the [contract](#contract) below.
+This Node translates Tool invocations to `GripperCommandGoal`, then translates downstream
+feedback/results into Tool status and results. It neither executes the controller nor runs a learned model.
+
+```text
+Gateway -> gripper_action_policy -> gripper_action_controller -> MuJoCo / robot Adapter
+                                   <- JointState feedback <-
+```
+
+[`gripper_action_controller`](https://github.com/PhyAgentOS/operator-controls/tree/dev/packages/gripper_action_controller)
+belongs to `operator-controls`. It generates joint-position commands and monitors arrival, stall,
+timeout and cancellation; it does not provide a ToolEndpoint itself.
+This policy's metre-based opening interface cannot directly serve a radian-based gripper.
+Implementation: [descriptor and Action adapter](src/gripper_action_policy_node/action_endpoint.py),
+[Dora runner](src/gripper_action_policy_node/runner.py).
+
+Compatibility: current dependency declarations are `dora-rs==0.4.1`, `forge-msgs==1.0.1`. See [pyproject.toml](pyproject.toml) and [uv.lock](uv.lock). The Tool protocol implementation is vendored in this repository. These declarations do not guarantee cross-version interoperability; also check the build revision and Skill lock when using artifacts.
+
+Changes to Node entrypoints, Endpoints or Tool APIs must update this section and the associated configuration/contracts. Follow the [Node README contract](https://github.com/PhyAgentOS/forge/blob/master/CONTRIBUTING.md#node-readme-contract).
+
+## Contract
+
+- The descriptor exposes `set_opening` as a cancellable Action with status lookup and maximum concurrency 1.
+- Caller arguments are exactly `{"opening_m": <finite number>}`.
+- The policy validates finiteness and converts the value to
+  `GripperCommandGoal(position=opening_m, max_velocity=None, max_effort=None)`.
+- Gateway schema and the downstream controller each validate the `0..0.105 m` mechanical bounds. This Node does not duplicate those bounds.
+- Each Tool attempt maps to a deterministic, bounded controller `goal_id`; retrying the same attempt does not resend the goal.
+
+## Install and run
+
+Forge messages resolve from public package indexes (`forge-msgs==1.0.1`);
+the Forge Tool protocol is vendored under `src/forge_tool`:
 
 ```bash
 uv sync
 uv run gripper-action-policy
 ```
 
-## Dora 端口
+## Dora ports
 
-输入：
+Inputs:
 
-- `tick`：驱动 endpoint lease 注册和续租。
-- `tool_in`：Forge `ToolMessage`，包括 registry response 与 Action 控制请求。
-- `gripper_feedback`：`forge_msgs.GripperCommandFeedback`，metadata 带 `goal_id`。
-- `gripper_result`：`forge_msgs.GripperCommandResult`，metadata 带 `goal_id` 和
-  `goal_status`。
+- `tick`: drives Endpoint lease registration and renewal.
+- `tool_in`: Forge `ToolMessage`, including registry responses and Action control requests.
+- `gripper_feedback`: `forge_msgs.GripperCommandFeedback`, with `goal_id` in metadata.
+- `gripper_result`: `forge_msgs.GripperCommandResult`, with `goal_id` and `goal_status` in metadata.
 
-输出：
+Outputs:
 
-- `tool_out`：注册、注销、Action 响应、状态、结果及 `ToolEvent`。
-- `gripper_goal`：`forge_msgs.GripperCommandGoal`，metadata 带 `goal_id`。
-- `gripper_cancel`：布尔触发值，metadata 带 `goal_id`。
+- `tool_out`: registration, unregistration, Action responses, status, results and `ToolEvent`.
+- `gripper_goal`: `forge_msgs.GripperCommandGoal`, with `goal_id` in metadata.
+- `gripper_cancel`: boolean trigger, with `goal_id` in metadata.
 
-runner 组合 Forge 公共 `ToolEndpointHandler`、`DoraToolEndpointBinding` 与
-`EndpointLease`，不自行实现 Tool Wire dispatch。进程停止时先停止接收新 goal 并请求取消；
-cancel 被接收不代表 controller 已确认终态，因此活跃 goal 的 shutdown 状态明确视为 ambiguous。
+The runner composes Forge's public `ToolEndpointHandler`, `DoraToolEndpointBinding` and
+`EndpointLease`; it does not implement its own Tool Wire dispatch. Shutdown first stops
+accepting new goals and requests cancellation. Accepted cancellation is not a controller-confirmed
+terminal state, so shutdown with an active goal is explicitly treated as ambiguous.
 
-## 测试与构建
+## Test and build
 
 ```bash
 uv run pytest
@@ -49,7 +87,7 @@ uv run ruff check .
 ./scripts/build_pyinstaller.sh
 ```
 
-PyInstaller 单文件产物为 `dist/gripper_action_policy`。
+The PyInstaller single-file output is `dist/gripper_action_policy`.
 
 ## Development
 

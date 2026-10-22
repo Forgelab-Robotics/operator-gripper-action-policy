@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for contributing to the Relative Pose Policy Node.
+Thank you for contributing to the Gripper Action Policy Node.
 
 ## Development
 
@@ -9,14 +9,14 @@ Use Python 3.12 and `uv`:
 ```bash
 uv sync --frozen --all-groups
 uv run pytest -q
-uv run forge-relative-motion-policy --help
+uv run gripper-action-policy --help
 ```
 
 The vendored `forge-tool` protocol under `src/forge_tool` is resolved
 automatically by the pytest configuration and the package init; it needs no
 environment setup. Keep changes focused and add tests for behavior changes.
-Keep the Query endpoint and resolver layers separate: `RelativePoseResolver`
-must stay independent of `forge_tool`.
+Keep the Action endpoint, deterministic goal mapping and Dora transport layers
+separate. Controller execution belongs to the downstream controller Node.
 
 ## Security and generated data
 
@@ -28,3 +28,10 @@ must stay independent of `forge_tool`.
 
 By submitting a contribution, you agree that it is licensed under Apache
 License 2.0.
+
+## README capability summary
+
+Changes to Node entrypoints, Endpoint operations or Tool APIs must update the root
+English `README.md` and Chinese `README_zh.md` capability summaries in the same
+change; keep the files separate and add reciprocal language links. Follow the [Node README contract](https://github.com/PhyAgentOS/forge/blob/master/CONTRIBUTING.md#node-readme-contract);
+count Nodes, Endpoints, operations and deployment Tools separately.
